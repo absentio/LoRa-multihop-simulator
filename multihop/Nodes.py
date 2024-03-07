@@ -454,15 +454,15 @@ class Node:
                         pdr_next_hop = 0
                         if self._at_gateway[self._last_arm] > 0:
                             pdr_next_hop = self._at_gateway[self._last_arm]/self._selections[self._last_arm]
-                        if self.settings["REWARD"] is None or self.settings["REWARD"] == "magellan":
+                        if self.settings.REWARD is None or self.settings.REWARD == "magellan":
                             #reward = 0.5*tdr + 0.3*energy_factor - 0.1 * hop
                             reward = 0.4*tdr + 0.5*energy_factor + 0.1 * min_hop
-                        elif self.settings["REWARD"] == "mine":
+                        elif self.settings.REWARD == "mine":
                         #reward = 0.25*tdr + 0.4*energy_factor + 0.1 * min_hop + 0.25*pdr_next_hop
                             reward = min_hop
-                        elif self.settings["REWARD"] == "maxf":
+                        elif self.settings.REWARD == "maxf":
                             reward = energy_factor
-                        elif self.settings["REWARD"] == "maxr":
+                        elif self.settings.REWARD == "maxr":
                             reward = tdr
                     self._arm_rewards[self._last_arm].append(reward)
                     self.rewards.append(reward)
