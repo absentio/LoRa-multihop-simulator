@@ -69,7 +69,7 @@ class Network:
                 algorithm = kwargs.get('algorithm', None)
 
             reward = None
-            if "ALGORITHM" in self.settings.keys():
+            if "REWARD" in self.settings.keys():
                 reward = self.settings["REWARD"]
             else:
                 reward = kwargs.get('reward', None)

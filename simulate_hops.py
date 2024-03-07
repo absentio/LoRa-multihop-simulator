@@ -13,7 +13,7 @@ logging.getLogger().setLevel(logging.INFO)
 
 #random.seed(5555)
 #np.random.seed(19680801)
-num_sim = 5
+num_sim = 1
 pdrs = []
 avg_en = []
 std = []

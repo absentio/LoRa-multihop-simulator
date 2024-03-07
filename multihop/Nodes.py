@@ -519,7 +519,7 @@ class Node:
                     self.message_in_tx.header.address = route
                     self._last_arm = route
                     #print("MAB Route", route)
-                print("Scelgo: ",route)
+                print("Scelgo: ",route, "reward:", settings.REWARD)
             
             
             if self.type == NodeType.GATEWAY:
