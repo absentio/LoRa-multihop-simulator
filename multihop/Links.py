@@ -47,6 +47,8 @@ class LinkTable:
             nw = self.network
 
         pos = nx.get_node_attributes(nw, 'pos')
+        #print(pos)
+        #print(nx.get_edge_attributes(nw, 'weight'))
         edges, weights = zip(*nx.get_edge_attributes(nw, 'weight').items())
         weights = tuple(item / w * 4 for item in weights)
 
@@ -72,7 +74,7 @@ class LinkTable:
         plt.axis('on')
         ax.tick_params(left=True, bottom=True, labelleft=True, labelbottom=True)
         ax.axis('equal')
-        plt.show(block=False)
+        plt.show(block=True)
 
     def plot_usage(self):
         network = nx.Graph()
@@ -97,7 +99,8 @@ class Link:
         self.node2 = node2
         self._shadowing = np.random.normal(self.settings.SHADOWING_MU, self.settings.SHADOWING_SIGMA)
         self.used = 0
-
+        self.collisions = 0
+        self._stx = 0
         self._rss = 0
         self._snr = 0
         self._distance = 0
@@ -120,7 +123,6 @@ class Link:
         shadowing = 0
         if self.settings.SHADOWING_ENABLED:
             shadowing = self._shadowing
-
         if self.settings.ENVIRONMENT.lower() == "urban":
             return 74.85 + 2.75 * 10 * np.log10(self.distance()) + shadowing  # shadowing per link
         elif self.settings.ENVIRONMENT.lower() == "coast":
@@ -129,7 +131,7 @@ class Link:
             return 95.52 + 2.03 * 10 * np.log10(self.distance()) + shadowing  # shadowing per link
 
     def snr(self):
-        self._snr = self.rss() + 116.86714407 # thermal noise for 25°C 500kHz BW
+        self._snr = self.rss() + 116.86714407 # thermal noise for 25°C 125kHz BW
         return self._snr
 
     def in_range(self):
@@ -141,3 +143,14 @@ class Link:
 
     def use(self):
         self.used += 1
+
+    def collision(self):
+        self.collisions += 1
+
+    def successes(self):
+        return self.used - self.collisions
+    
+    def tdr(self):
+        if self.used > 0:
+            return self.successes() / float(self.used)
+        return None

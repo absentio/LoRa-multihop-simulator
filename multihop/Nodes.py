@@ -5,6 +5,7 @@ from .Links import LinkTable
 from .Routes import Route
 
 import numpy as np
+import networkx as nx
 import simpy
 from aenum import Enum, MultiValue, auto, IntEnum
 import collections
@@ -12,7 +13,7 @@ from tabulate import tabulate
 import simpy
 import math
 import logging
-
+import statistics
 
 class GatewayState(IntEnum):
     STATE_INIT = auto()
@@ -37,6 +38,7 @@ class NodeState(Enum):
     STATE_PREAMBLE_TX = 5, "P_TX"
     STATE_SLEEP = 1, "ZZZ"
     STATE_SENSING = 4, "SNS"
+    STATE_DEPLETED = 7, "DEP"
 
 
 def power_of_state(settings, s: NodeState):
@@ -46,8 +48,8 @@ def power_of_state(settings, s: NodeState):
     if s is NodeState.STATE_TX: return settings.POWER_TX_mW
     if s is NodeState.STATE_PREAMBLE_TX: return settings.POWER_TX_mW
     if s is NodeState.STATE_SLEEP: return settings.POWER_SLEEP_mW
-    if s is NodeState.STATE_SENSING:
-        return settings.POWER_SENSE_mW
+    if s is NodeState.STATE_SENSING: return settings.POWER_SENSE_mW
+    if s is NodeState.STATE_DEPLETED: return 0
     else:
         ValueError(f"Sensorstate {s} is unknown")
 
@@ -69,12 +71,22 @@ class Node:
         self.forwarded_payloads = []
         self.forwarded_from = []
         self.number_of_aggregated = []
+        self.fairness_factors = []
         self.message_counter_own_data_and_forwarded_data = 0
         self.message_counter_only_forwarded_data = 0
         self.message_counter_only_own_data = 0
+        self.message_counter_arrived_at_gateway = 0
         self._pdr = 0
         self._plr = 0
 
+        #MAB
+        self._selections = None
+        self.rewards = []
+        self._arm_rewards = None
+        self._last_reward = 0
+        self._last_arm = 0
+        self.gateway_direct = False
+        self._at_gateway = None
         # Buffers
         self.data_buffer = []
         self.data_created_at = 0
@@ -93,6 +105,8 @@ class Node:
         self.uid = _id
         self.state = None
         self.energy_mJ = 0
+        self.min_hops = self.settings["MAX_ROUTE_SIZE"]
+        self.initial_energy = self.settings["NODE_ENERGY"]
         self.time_to_sense = None
         self.time_spent_in = {}
         for state in NodeState:
@@ -128,12 +142,33 @@ class Node:
         # Payload
         self.application_counter = 0
 
-
+    def residual_energy(self):
+        if self.type == NodeType.SENSOR:
+            return self.initial_energy - self.energy_mJ
+        return self.initial_energy
 
     def add_meta(self, _settings, nodes, link_table):
         self.nodes = nodes
         self.link_table = link_table
         self.settings = _settings
+
+        #self._arm_rewards = []
+        if self._selections is None:
+            self._selections = np.zeros(len(self.nodes))
+            self._at_gateway = np.zeros(len(self.nodes))
+            self._arm_rewards = [ [] for x in range(len(self.nodes))]
+            self.initial_energy = self.settings["NODE_ENERGY"]
+        #self._selections = [0] * len(self.nodes)
+            
+    def neighbour_average_spent_energy(self):
+        spent_energy = 0
+        v = 0
+        vicini =  [self.nodes[i] for i in self.route.get_neighbours_uid()]
+        for n in vicini:
+            if n.type != NodeType.GATEWAY:
+                spent_energy = spent_energy + n.energy_mJ
+                v += 1
+        return spent_energy / v
 
     def state_change(self, state_to):
         if state_to is self.state and state_to is not NodeState.STATE_SLEEP:
@@ -146,7 +181,9 @@ class Node:
             if len(self.states_time) > 0:
                 self.energy_mJ += (self.env.now - self.states_time[-1]) * power_of_state(self.settings, self.state)
                 self.time_spent_in[self.state.name] += (self.env.now - self.states_time[-1])
-
+            if self.residual_energy() < 1:
+                state_to = NodeState.STATE_DEPLETED
+                logging.info(f"{self.uid}\tBATTERY DEPLETED")
             self.state = state_to
             self.states.append(state_to)
             self.states_time.append(self.env.now)
@@ -224,6 +261,8 @@ class Node:
 
     def periodic_wakeup(self):
         while True:
+            if self.state == NodeState.STATE_DEPLETED:
+                break
             self.state_change(NodeState.STATE_SLEEP)
             cad_interval = self.settings.CAD_INTERVAL + random(self.settings.CAD_INTERVAL_RANDOM_S)
             yield self.env.timeout(cad_interval)
@@ -359,12 +398,137 @@ class Node:
                     if u not in exclude:
                         exclude.append(u)
 
-            route = self.route.find_route(exclude)
-            if route is None:
-                self.message_in_tx.header.address = 0
-            else:
-                self.message_in_tx.header.address = route["uid"]
-
+            route = None
+            id_vicini = self.route.get_neighbours_uid()
+            max_upper_bound = -10000
+            reward = 0
+            self.gateway_direct = False
+            if 0 in id_vicini:
+                self.gateway_direct = True
+                route = 0
+                self._selections[route] = self._selections[route] + 1
+                self._last_arm = route
+                self.message_in_tx.header.address = route
+            '''else:
+                if self._last_arm == 0:
+                    lost_pkt = True'''
+            if self.type == NodeType.SENSOR and len(self.route.neighbour_list)>0 and not self.gateway_direct:
+                if np.sum(self._selections)>0:
+                    #print(self.messages_sent)
+                    #print(collision)
+                    collided = self.messages_sent[-1].collided
+                    #print(collided)
+                    if not collided:
+                        link = self.link_table.get_from_uid(self._last_arm, self.uid)
+                        tdr = link.tdr()
+                        vicini =  [self.nodes[i] for i in id_vicini]
+                        #print("Il mio ultimo arm ",self._last_arm)
+                        #hop = self.route.find_node(self._last_arm)
+                        #hop = hop["hops"]
+                        best_node = self.route.find_best()
+                        #best = 0
+                        #if int(best_node["uid"]) == self._last_arm:
+                         #print("best selected")
+                         #best = 1
+                        min_hop = 0
+                        energy_factor = 1
+                        if self.route.find_node(self._last_arm)["hops"] <= best_node["hops"]:
+                            #print("WE HAVE NOT SELECTED MIN HOP")
+                            min_hop = 1
+                        if self._last_arm != 0:
+                            res_en = self.nodes[self._last_arm].residual_energy()
+                            print("Node", self.uid, "residual energy", self.residual_energy(),"\tSelected node ", self._last_arm, " residual energy:", res_en)
+                            print(self.nodes[self._last_arm].route)
+                            listone = list(set(self.nodes[self._last_arm].route.get_neighbours_uid()) - {0})
+                            print("Listone old:", listone)
+                            #listone = list(set(self.nodes[self._last_arm].route.find_closer(self.nodes[self._last_arm].min_hops)) - {0})
+                            a = (x for x in listone if 0 not in self.nodes[x].route.get_neighbours_uid())
+                            listone = [x for x in a]
+                            print("Listone new:", listone)
+                            #programPause = input("Press the <ENTER> key to continue...")                
+                            if len(listone) > 0:
+                            #listone = self.nodes[self._last_arm].route.get_neighbours_uid()
+                                energy_factor = 1 - abs(1/self.initial_energy*(res_en - statistics.fmean([self.nodes[x].residual_energy() for x in listone])))
+                        print("Fairness factor:", energy_factor)
+                        self.fairness_factors.append(energy_factor)
+                        pdr_next_hop = 0
+                        if self._at_gateway[self._last_arm] > 0:
+                            pdr_next_hop = self._at_gateway[self._last_arm]/self._selections[self._last_arm]
+                        if self.settings["REWARD"] is None or self.settings["REWARD"] == "magellan":
+                            #reward = 0.5*tdr + 0.3*energy_factor - 0.1 * hop
+                            reward = 0.4*tdr + 0.5*energy_factor + 0.1 * min_hop
+                        elif self.settings["REWARD"] == "mine":
+                        #reward = 0.25*tdr + 0.4*energy_factor + 0.1 * min_hop + 0.25*pdr_next_hop
+                        reward = min_hop
+                        elif reward
+                        reward = energy_factor
+                        #reward = tdr
+                    self._arm_rewards[self._last_arm].append(reward)
+                    self.rewards.append(reward)
+               #print("Excluded ", exclude)
+                if self.settings.ALGORITHM=="random":
+                    possibili = list(set(id_vicini) - set(exclude))
+                    if len(possibili) < 1:
+                        self.message_in_tx.header.address = 0
+                        #print(id_vicini)
+                        #print(exclude)
+                        #print(possibili)
+                        #self.state_change(NodeState.STATE_SLEEP)
+                        #self.done_tx = None
+                        #self.message_in_tx = None
+                        #self.forwarded_mgs_buffer = []
+                        #self.data_buffer = []
+                        #return
+                    else:
+                        route = rnd.choice(possibili)
+                elif self.settings.ALGORITHM=="mab":
+                    print("Min Hops:", self.min_hops)
+                    for k in range(len(self.route.neighbour_list)):
+                        upper_bound = -10000
+                        #print(self.route.neighbour_list)
+                        i = int(self.route.neighbour_list[k]["uid"])
+                        #print("Provo", i)
+                        #if i not in exclude and int(self.route.neighbour_list[k]["hops"]) < self.min_hops:
+                        if i not in exclude and int(self.route.neighbour_list[k]["hops"]) < self.min_hops:
+                            if self._selections[i] > 0 and len(self.rewards) > 0:
+                                    delta_i = math.sqrt(3/2 * math.log(len(self.rewards)) / self._selections[i])
+                                    upper_bound = statistics.fmean(self._arm_rewards[i]) + delta_i
+                            else:
+                                route = i
+                                print(f"PROVO {i} PER LA PRIMA VOLTA")
+                                break
+                            if upper_bound > max_upper_bound:
+                                max_upper_bound = upper_bound
+                                route = i
+                    if route == None:
+                        print("Sono il nodo ", self.uid)
+                        print("Vicini: ", self.route.neighbour_list)
+                        print("Escludi: ", exclude)
+                        print("Min Hops", self.min_hops)
+                        print("Selezioni:", np.sum(self._selections))
+                        #programPause = input("Press the <ENTER> key to continue...")                
+                elif self.settings.ALGORITHM=="original":
+                    route = self.route.find_route(exclude)
+                    route = int(route["uid"])
+                
+                if route is None:
+                    self.message_in_tx.header.address = 0
+                else:
+                    self._selections[route] = self._selections[route] + 1
+                    self.message_in_tx.header.address = route
+                    self._last_arm = route
+                    #print("MAB Route", route)
+                print("Scelgo: ",route)
+            
+            
+            if self.type == NodeType.GATEWAY:
+                route = self.route.find_route(exclude)
+                if route is None:
+                    self.message_in_tx.header.address = 0
+                else:
+                    route = int(route["uid"])
+                    self.message_in_tx.header.address = route
+                    self._selections[route] = self._selections[route] + 1
             # Increase counters and adjust lqi if forward
             if len(self.message_in_tx.payload.forwarded_data) > 0:
                 self.message_in_tx.hop(self)
@@ -372,8 +536,8 @@ class Node:
                     self.link_table.get_from_uid(self.uid, self.forwarded_mgs_buffer[0].payload.own_data.src).lqi()
 
         if self.message_in_tx is not None:
+            yield self.env.timeout(rnd.uniform(0,1))
             self.state_change(NodeState.STATE_PREAMBLE_TX)
-
             packet_time = self.message_in_tx.time()
             self.start_tx = self.env.now + self.settings.PREAMBLE_DURATION_S
             self.done_tx = self.start_tx + packet_time
@@ -498,6 +662,7 @@ class Node:
                             node.message_in_tx.header.address == self.uid and not node.message_in_tx.collided:
                         logging.info(f"{self.uid}\t Routed collision detected that was addressed to us")
                         node.message_in_tx.handle_collision()
+                        self.link_table.get(node, self).collision()
                         self.collisions.append(self.env.now)
 
         return active_node
@@ -522,6 +687,7 @@ class Node:
                                   rx_packet.header.cumulative_lqi + self.link_table.get_from_uid(self.uid,
                                                                                                  rx_packet.header.address).lqi(),
                                   rx_packet.header.hops)
+                self.min_hops = self.route.min_hop()
                 logging.info(f"{self.uid}\r\n{self.route}")
 
         if rx_packet.header.uid in self.messages_seen:
@@ -562,6 +728,7 @@ class Node:
         return packet_for_us
 
     def arrived_at_gateway(self, payload):
+        self.message_counter_arrived_at_gateway += 1
         # Update statistics
         if payload.size()-3 > settings.MEASURE_PAYLOAD_SIZE_BYTE:
             for i in range(0, math.floor((payload.size()-3)/settings.MEASURE_PAYLOAD_SIZE_BYTE)):
@@ -570,6 +737,16 @@ class Node:
                 self.own_payloads_arrived_at_gateway.append(cp)
         else:
             self.own_payloads_arrived_at_gateway.append(payload)
+        if self.uid in payload.trace:
+            #print(self.uid)
+            #print(payload)
+            #print(payload.src)
+            #programPause = input("Press the <ENTER> key to continue...")
+            uid = 0
+            if len(payload.trace) > 1:
+                idx = payload.trace.index(self.uid) + 1
+                uid = payload.trace[idx]
+            self._at_gateway[uid] = self._at_gateway[uid] + 1
 
     def pdr(self):
         if len(self.own_payloads_sent) > 0:

@@ -1,3 +1,4 @@
+import statistics
 from .utils import *
 from .Timers import TxTimer, TimerType
 from .Packets import Message, MessageType
@@ -27,8 +28,8 @@ class Network:
         self.nodes = []
         self.simpy_env = simpy.Environment()
         self.link_table = None
-
-        self.start_time = datetime.now().strftime("%Y-%m-%d %H-%M-%S")
+        mpl.use('QtAgg')
+        self.start_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
         s = kwargs.get("settings", None)
         if s is not None:
@@ -61,6 +62,17 @@ class Network:
             n_y = None
             n = None
 
+            algorithm = None
+            if "ALGORITHM" in self.settings.keys():
+                algorithm = self.settings["ALGORITHM"]
+            else:
+                algorithm = kwargs.get('algorithm', None)
+
+            reward = None
+            if "ALGORITHM" in self.settings.keys():
+                reward = self.settings["REWARD"]
+            else:
+                reward = kwargs.get('reward', None)
             positioning = None
             if "NETWORK_SHAPE" in self.settings.keys():
                 positioning = self.settings["NETWORK_SHAPE"]
@@ -93,24 +105,27 @@ class Network:
                 size_x = size
                 size_y = size
 
-            density = None
-            if "NETWORK_DENSITY" in self.settings.keys():
-                density = self.settings["NETWORK_DENSITY"]
+            if "NETWORK_NODES" in self.settings.keys():
+                n = self.settings["NETWORK_NODES"]
             else:
-                density = kwargs.get('density', None)
-
-            if density is not None:
-                n_x = round(math.sqrt(density) / 1000 * size_x)
-                n_y = round(math.sqrt(density) / 1000 * size_y)
-                n = n_x * n_y
-            else:
-                n_x = kwargs.get('n_x', None)
-                n_y = kwargs.get('n_y', None)
-                if n_x is None or n_y is None:
-                    n = kwargs.get('n', None)
+                density = None
+                if "NETWORK_DENSITY" in self.settings.keys():
+                    density = self.settings["NETWORK_DENSITY"]
                 else:
-                    n = n_x * n_y
+                    density = kwargs.get('density', None)
 
+                if density is not None:
+                    n_x = math.sqrt(density) / 1000 * size_x
+                    n_y = math.sqrt(density) / 1000 * size_y
+                    n = round(n_x * n_y)
+                else:
+                    
+                    n_x = kwargs.get('n_x', None)
+                    n_y = kwargs.get('n_y', None)
+                    if n_x is None or n_y is None:
+                        n = kwargs.get('n', None)
+                    else:
+                        n = n_x * n_y
             rnd = None
             if "NETWORK_SIZE_RANDOM" in self.settings.keys():
                 rnd = self.settings["NETWORK_SIZE_RANDOM"]
@@ -169,7 +184,10 @@ class Network:
             elif positioning == "matrix":
                 uid = 1
                 for y in range(0, n_y):
+                    if uid >= len(node_uids):
+                        break
                     for x in range(0, n_x):
+                        print(uid)
                         self.nodes.append(Node(self.simpy_env, self.settings, node_uids[uid],
                                                Position(
                                                    -size_x / 2 + x * size_x / (n_x - 1) + np.random.uniform(-rnd / 2,
@@ -178,6 +196,8 @@ class Network:
                                                                                                             rnd)),
                                                NodeType.SENSOR, fixed_route=fixed_route))
                         uid += 1
+                        if uid >= len(node_uids):
+                            break
 
             elif positioning == "circles-equal" or positioning == "circles":
                 uid = 1
@@ -270,7 +290,8 @@ class Network:
             elif positioning == "custom":
                 f = open(shape_file)
                 nodes = json.load(f)
-
+                nodes = nodes[:n]
+                #print(nodes)
                 for n in nodes:
                     if n["uid"] > 0:
                         self.nodes.append(Node(self.simpy_env, self.settings, n["uid"],
@@ -281,7 +302,8 @@ class Network:
             recalc = self.evaluate_distances()
             while recalc:
                 recalc = self.evaluate_distances()
-
+        #uids = [node.uid for node in self.nodes]
+        #print(uids)
         self.update()
 
     def set_settings(self, settings):
@@ -301,18 +323,23 @@ class Network:
                 node.add_meta(self.settings, self.nodes, self.link_table)
 
     def add_sensor_node(self, uid, x, y):
-        self.nodes.append(Node(self.simpy_env, uid,
+        self.nodes.append(Node(self.simpy_env, self.settings, uid,
                                Position(x, y),
                                NodeType.SENSOR))
         self.update()
 
     def evaluate_distances(self):
+        #max_d = math.pow(10, (42.96 - self.settings["LORA_SENSITIVITY"]) / (36.2))
+        max_d = 500
         for node1 in self.nodes:
+            has_neighbours = False
             for node2 in self.nodes:
                 if node1.uid is not node2.uid and node1.uid < node2.uid:
                     d = np.sqrt(np.abs(node1.position.x - node2.position.x) ** 2 +
                                 np.abs(node1.position.y - node2.position.y) ** 2)
-                    if d < 1:
+                    if d < max_d:
+                        has_neighbours = True
+                    if d < 10:
                         # Distance between two nodes is too small: move each node half of what is needed
                         t = -(1 - d) / 2
                         x1 = (1 - t / d) * node1.position.x + t / d * node2.position.x
@@ -323,8 +350,18 @@ class Network:
 
                         node1.position = Position(x1, y1)
                         node2.position = Position(x2, y2)
+            if not has_neighbours:
+                if node1.position.x > 0:
+                    node1.position.x = node1.position.x - 10
+                else:
+                    node1.position.x = node1.position.x + 10
 
-                        return True
+                if node1.position.y > 0:
+                    node1.position.y = node1.position.y - 10
+                else:
+                    node1.position.y = node1.position.y + 10
+        return has_neighbours
+
 
     def rerun(self, time):
         self.simpy_env = simpy.Environment()
@@ -334,7 +371,6 @@ class Network:
 
     def run(self):
         time = self.settings.SIMULATION_RUN_TIME
-
         # First get max hop count in total network to establish how long the simulation should be extended
         paths = self.link_table.get_all_pairs_shortest_path()
         max_hops = 0
@@ -448,7 +484,6 @@ class Network:
         import matplotlib.pyplot as plt
 
         data = self.statistic("children", stat, **kwargs)
-
         type = kwargs.get("type")
 
         fig, ax = plt.subplots()
@@ -458,7 +493,7 @@ class Network:
             plt.xticks(range(1, len(labels) + 1), labels)
             ax.set_ylabel(stat)
         elif type == "cdf":
-            mpl.use('TkAgg')
+            #mpl.use('QtAgg')
             fig, ax = plt.subplots(figsize=(8, 4))
 
             pdr = []
@@ -470,9 +505,12 @@ class Network:
             plt.plot(x_axis, y_axis, label='overall')
 
             _filter = [[0], [1], [2], [3], [4], [5], [6], [7]]
+            print(len(data))
             for f in _filter:
                 pdr = []
-                for mf in f:
+                gen = (x for x in f if x < len(data))
+                for mf in gen:
+                    print(mf)
                     pdr = pdr + data[mf]
 
                 x_axis = [0] + np.sort(pdr).tolist()
@@ -494,15 +532,126 @@ class Network:
 
         # tikzplotlib.save(f"results/{self.start_time}_{stat}.tex")
         plt.legend()
-        plt.show(block=False)
+        plt.show(block=True)
 
+    def print_twice(self, f, *args,**kwargs):
+        print(*args,**kwargs)
+        print(file=f,*args,**kwargs)
+
+    def hops(self):
+        avg_hops = []
+        for node in self.nodes:
+            if node.type == NodeType.SENSOR and len(node.own_payloads_arrived_at_gateway)>0:
+                hop = 0
+                for payload in node.own_payloads_arrived_at_gateway:
+                    hop += payload.hops
+                avg_hops.append(hop/len(node.own_payloads_arrived_at_gateway))
+                print(f"Node {node.uid} AVG HOP #: {avg_hops[-1]}")
+        print("Average hops #:", statistics.fmean(avg_hops))
+        with open(f"results/{self.start_time}_{self.settings['NETWORK_NODES']}_{self.settings['ALGORITHM']}.txt", "a") as f:
+            print("Average hops #:", statistics.fmean(avg_hops),file = f)
+        return statistics.fmean(avg_hops)
+    
+    def energy(self):
+        energies = []
+        energies_indirect = []
+        for node in self.nodes:
+            if node.type == NodeType.SENSOR:
+                print(f"Node {node.uid} spent energy #: {node.energy_mJ}")
+                if len(node.route.neighbour_list)>0:
+                    print(f"Node {node.uid} spent energy per neighbour #: {node.energy_mJ / len(node.route.neighbour_list)}")
+                else:
+                    print("NO NEIGHBOURS")
+                if 0 not in node.route.get_neighbours_uid():
+                    print("is indirect")
+                    energies_indirect.append(node.energy_mJ)
+                energies.append(node.energy_mJ)
+        avg = statistics.fmean(energies)
+        std = statistics.stdev(energies)
+        ind_en = statistics.fmean(energies_indirect)
+        ind_std = statistics.stdev(energies_indirect)
+        print("Average energy spent: ", avg)
+        print("Standard deviation: ", std)
+        print("Average indirect energy spent: ", ind_en)
+        print("Indirect Standard deviation: ", ind_std)
+        with open(f"results/{self.start_time}_{self.settings['NETWORK_NODES']}_{self.settings['ALGORITHM']}.txt", "a") as f:
+            print("Average energy spent: ", avg, file=f)
+            print("Standard deviation: ", std, file =f)
+        return avg, std
+    
     def pdr(self):
         payloads_sent = 0
         payloads_received = 0
         for node in self.nodes:
             if node.type == NodeType.SENSOR:
-                payloads_sent += len(node.own_payloads_sent)
-                payloads_received += len(node.own_payloads_arrived_at_gateway)
+                #print("Node ", node.uid, " Packets sent", node.message_counter_only_own_data, "Counter arrived at gateway", node.message_counter_arrived_at_gateway)
+                #print((len(node.own_payloads_sent)))
+                coll = 0
+                for msg in node.own_payloads_sent:
+                        if msg.collided == True:
+                            coll +=1
+                #print("Coll", coll, "Delivered", node.message_counter_only_own_data - coll)
+                #print("Node ", node.uid, "delivered: ", len(node.own_payloads_arrived_at_gateway))
+                payloads_sent += node.message_counter_only_own_data
+                payloads_received += node.message_counter_only_own_data - coll
+        print("Packets sent:", payloads_sent)
+        print("Packets received at gateway:", payloads_received)
+        with open(f"results/{self.start_time}_{self.settings['NETWORK_NODES']}_{self.settings['ALGORITHM']}.txt", "a") as f:
+            print("Packets sent:", payloads_sent, file = f)
+            print("Packets received at gateway:", payloads_received, file = f)
+            print("PDR: ", payloads_received / payloads_sent, file=f)
+        return payloads_received / payloads_sent
+    
+    def tdr(self):
+        from dateutil.relativedelta import relativedelta
+        payloads_sent = 0
+        payloads_received = 0
+        times = [0]*len(self.nodes)
+        for node in self.nodes:
+            idx = node.states.index(NodeState.STATE_DEPLETED) if NodeState.STATE_DEPLETED in node.states else -1
+            tdrs = []
+            a = node.route.get_neighbours_uid()
+            links = [self.link_table.get_from_uid(node.uid, x) for x in a]
+            #collisions = sum([x.collisions for x in links])
+            for l in filter(lambda x: x.used > 0, links):
+                #print(l.used, l.collisions, l.successes(), l.tdr())
+                tdrs.append(l.tdr())
+            if len(tdrs) > 0:
+                tdr = statistics.fmean(tdrs)
+            else:
+                tdr = 0
+            print(f"Node ", node.uid, "TDR: ", tdr, " collisions:", len(node.collisions))
+            #somma_at_gateway = np.sum(node._at_gateway)
+            #print("Pacchetti arrivati per next hop: ", node._at_gateway)
+            #print("Somma calcolata: ", somma_at_gateway)
+            #print("Contatore: ", node.message_counter_arrived_at_gateway)
+            if len(node.fairness_factors)>0:
+                print("AVG energy factor:", statistics.fmean(node.fairness_factors))
+            if idx > -1:
+                rt = relativedelta(seconds = node.states_time[idx])
+                times[node.uid] = rt
+                #print('Depleted at {:02d}:{:02d}:{:02d}'.format(int(rt.hours), int(rt.minutes), int(rt.seconds)))
+            print(node.uid, node.collisions)
+            print(node.route.neighbour_list)
+            print(node._selections)
+            if len(node.rewards)>0:
+                print("rewards", statistics.fmean(node.rewards))
+                print("max rew", max(node.rewards))
+                print("min rew", min(node.rewards))
+            if node.type == NodeType.SENSOR:
+                payloads_sent += len(node.messages_sent)
+                for mess in node.messages_sent:
+                    if mess.collided == False:
+                        payloads_received += 1
+                    #else:
+                        #print(mess)
+                #payloads_received += len(node.own_payloads_arrived_at_gateway)
+        with open(f"results/{self.start_time}_{self.settings['NETWORK_NODES']}_{self.settings['ALGORITHM']}.txt", "a") as f:
+            for i, rt in enumerate(times):
+                if type(rt) == relativedelta:
+                    print('Node {} Depleted at {:02d}:{:02d}:{:02d}'.format(i, int(rt.hours), int(rt.minutes), int(rt.seconds)), file=f)
+        print("Transmissions sent:", payloads_sent)
+        print("Transmissions received at next hop:", payloads_received)
 
         return payloads_received / payloads_sent
 
@@ -598,6 +747,15 @@ class Network:
         ofile = open(f"results/{self.start_time}_network.dill", "wb")
         dill.dump(self, ofile)
         ofile.close()
+        if self.settings["NETWORK_SHAPE"] != "custom":
+            x = "["
+            for node in self.nodes:
+                y = '{' +'"uid": {}, "position": {{"x": {}, "y": {}'.format(node.uid,node.position.x,node.position.y) + "}},"
+                x = x + y
+            x = x[:-1] + "]"
+            #print(x)
+            with open(f'{self.start_time}_location.json', 'w', encoding='utf-8') as fp:
+                fp.write(x)        #a = json.dump(x)
 
     @staticmethod
     def load(filename):

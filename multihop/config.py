@@ -25,3 +25,4 @@ with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../configura
     config_str = Environment().from_string(f.read()).render()
     settings = yaml.load(config_str, ExprLoader)
     settings = DefaultMunch.fromDict(settings) # dict -> object
+    #print(settings)

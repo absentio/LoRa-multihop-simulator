@@ -3,7 +3,7 @@
 {% set Vcc = 3.3 %}
 
 # LORA PHY SPECIFIC
-{% set SF = 7 %}
+{% set SF = 8 %}
 {% set BW = 125 %}
 LORA_SF: {{ SF }}
 LORA_CRC: 0
@@ -11,21 +11,24 @@ LORA_CODE_RATE: 1 # code rate [1-4] default 1
 LORA_BANDWIDTH: {{ BW }} # in kHz
 LORA_LOW_DATA_RATE_OPTIMIZE: 0 # Low Data Rate Optimize
 LORA_IMPLICIT_HEADER: 0 # implicit header
-LORA_TRANSMIT_POWER: 2
-LORA_SENSITIVITY: -123
+LORA_TRANSMIT_POWER: 14
+LORA_SENSITIVITY: -126
 LORA_POWER_THRESHOLD: 6
 
 # SIMULATION PARAMETERS
-SIMULATION_RUN_TIME: {{60*60*6}}
-NETWORK_SHAPE: "matrix" # "custom"
-#NETWORK_SHAPE_FILE: "campus.json"
+SIMULATION_RUN_TIME: {{60*60*10}}
+NETWORK_SHAPE: "custom"
+NETWORK_SHAPE_FILE: "posizioni.json"
 NETWORK_SIZE_X: 1000
 NETWORK_SIZE_Y: 1000
-NETWORK_DENSITY: 500
-NETWORK_SIZE_RANDOM: 10
-NETWORK_GATEWAY_X: -500
-NETWORK_GATEWAY_Y: 500
-ENVIRONMENT: "coast"
+NETWORK_DENSITY: 10
+NETWORK_NODES: 15
+NETWORK_SIZE_RANDOM: 1
+NETWORK_GATEWAY_X: 0
+NETWORK_GATEWAY_Y: 0
+ALGORITHM: "original"
+ENVIRONMENT: "urban"
+REWARD: "maxf"
 
 
 PREAMBLE_DURATION_S: {{ PREAMBLE_DURATION_S }}
@@ -37,13 +40,14 @@ SHADOWING_SIGMA: 11.25
 SNR_MAX: 30
 
 # GATEWAY SPECIFIC PARAMS
-ROUTE_DISCOVERY_S: {{60*60*6}}        # period of transmitting a new beacon for routing
+ROUTE_DISCOVERY_S: {{60*60}}        # period of transmitting a new beacon for routing
 GW_BEACON_PAYLOAD_SIZE_BYTE: 3     #TODO now random value
 
 # SENSOR NODE SPECIFIC PARAMS
-MEASURE_INTERVAL_S: {{60*30}}          # how freq. a measurement is taken by the sensor node
+MEASURE_INTERVAL_S: {{60*5}}          # how freq. a measurement is taken by the sensor node
 MEASURE_DURATION_S: 0.02           # how long takes a measurement
 MEASURE_PAYLOAD_SIZE_BYTE: 6
+NODE_ENERGY: 360000
 
 MAX_BUF_SIZE_BYTE: {{ 96+16 }}
 MAX_BUF_SIZE_THRESHOLD: 0.75
@@ -52,8 +56,8 @@ MAX_SEEN_PACKETS: 32
 MAX_ROUTE_SIZE: 8
 
 # timer set when first data in buffer (sense or DL)
-TX_AGGREGATION_TIMER_NOMINAL: {{15*60}}
-TX_AGGREGATION_TIMER_RANDOM: !!python/tuple [90, 90]
+TX_AGGREGATION_TIMER_NOMINAL: {{0}}
+TX_AGGREGATION_TIMER_RANDOM: !!python/tuple [0, 0]
 TX_AGGREGATION_TIMER_STEP_UP: 0 #60     # update tx-data-timer when a msg has been received
 TX_AGGREGATION_TIMER_STEP_DOWN: 0 #30
 TX_AGGREGATION_TIMER_MIN_TIMES_STEP_DOWN: 15     # update tx-data-timer when a msg has been received
@@ -68,7 +72,7 @@ CAD_INTERVAL_RANDOM_S: !!python/tuple [{{ PREAMBLE_DURATION_S*0.125 }}, {{ PREAM
 # wait min TX_BEACON_COLL_AVOIDANCE_RANDOM before sending a data packet after a beacon was forwarded
 TX_BEACON_COLL_AVOIDANCE_RANDOM: !!python/tuple [{{ PREAMBLE_DURATION_S }}, {{ 3*PREAMBLE_DURATION_S }}]
 
-MAX_DELAY_START_PER_NODE_RANDOM_S: {{ 60*45}}  # random wait time till node is active (enters the network)
+MAX_DELAY_START_PER_NODE_RANDOM_S: {{ 60*10}}  # random wait time till node is active (enters the network)
 
 # Power consumption
 POWER_SLEEP_mW: {{ 5.11*Vcc/1000 }}
@@ -94,5 +98,4 @@ TIME_CAD_CYCLE_S: {{ TIME_CAD_WAKE_S+TIME_CAD_STABILIZE_S+TIME_CAD_PERFORM_S+TIM
 ENERGY_CAD_CYCLE_mJ: {{ ENERGY_CAD_CYCLE_mJ }}
 
 POWER_CAD_CYCLE_mW: {{ ENERGY_CAD_CYCLE_mJ/TIME_CAD_CYCLE_S}}
-
 #POWER_PROC_mW: {{ 0 }}
