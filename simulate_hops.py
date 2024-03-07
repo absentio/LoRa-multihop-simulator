@@ -40,9 +40,12 @@ for i in range(num_sim):
     en, dev = network.energy()
     avg_en.append(en)
     std.append(dev)
+
+end_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
 with open(f"results/{start_time}_{settings['NETWORK_NODES']}_{settings['ALGORITHM']}.txt", "a") as f:
     if settings['ALGORITHM'] == "mab":
-                print("Reward:", self.settings["REWARD"], file=f)
+                print("Reward:", settings["REWARD"], file=f)
     print("PDR :", statistics.fmean(pdrs), file = f)
     print("hops :", statistics.fmean(avg_hops), file = f)
     print("en :", statistics.fmean(avg_en), file = f)
@@ -65,4 +68,4 @@ with open(f"results/{start_time}_{settings['NETWORK_NODES']}_{settings['ALGORITH
 
 #network.save_settings()
 
-print("Test")
+print("End time:", end_time)
