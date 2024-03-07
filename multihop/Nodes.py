@@ -459,10 +459,11 @@ class Node:
                             reward = 0.4*tdr + 0.5*energy_factor + 0.1 * min_hop
                         elif self.settings["REWARD"] == "mine":
                         #reward = 0.25*tdr + 0.4*energy_factor + 0.1 * min_hop + 0.25*pdr_next_hop
-                        reward = min_hop
-                        elif reward
-                        reward = energy_factor
-                        #reward = tdr
+                            reward = min_hop
+                        elif self.settings["REWARD"] == "maxf":
+                            reward = energy_factor
+                        elif self.settings["REWARD"] == "maxr":
+                            reward = tdr
                     self._arm_rewards[self._last_arm].append(reward)
                     self.rewards.append(reward)
                #print("Excluded ", exclude)

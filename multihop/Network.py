@@ -28,7 +28,7 @@ class Network:
         self.nodes = []
         self.simpy_env = simpy.Environment()
         self.link_table = None
-        mpl.use('QtAgg')
+        #mpl.use('QtAgg')
         self.start_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
         s = kwargs.get("settings", None)
@@ -597,6 +597,8 @@ class Network:
         print("Packets sent:", payloads_sent)
         print("Packets received at gateway:", payloads_received)
         with open(f"results/{self.start_time}_{self.settings['NETWORK_NODES']}_{self.settings['ALGORITHM']}.txt", "a") as f:
+            if self.settings['ALGORITHM'] == "mab":
+                print("Reward:", self.settings["REWARD"], file=f)
             print("Packets sent:", payloads_sent, file = f)
             print("Packets received at gateway:", payloads_received, file = f)
             print("PDR: ", payloads_received / payloads_sent, file=f)
