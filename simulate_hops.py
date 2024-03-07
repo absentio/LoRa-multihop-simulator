@@ -2,6 +2,7 @@ from multihop.Network import *
 import matplotlib.pyplot as plt
 import random
 import logging
+import datetime
 from multihop.config import settings
 from multihop.utils import merge_data
 from multihop.preambles import preambles
@@ -12,17 +13,19 @@ logging.getLogger().setLevel(logging.INFO)
 
 #random.seed(5555)
 #np.random.seed(19680801)
-num_sim = 1
+num_sim = 5
 pdrs = []
 avg_en = []
 std = []
 avg_hops = []
+start_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 #network = Network.load("results/2024-02-26_13-06-29_network.dill")
 #link = network.link_table.get_from_uid(0,4)
 #print(link.in_range())
 #network.plot_network()
 #network.plot_network()
 #network.save()
+
 for i in range(num_sim):
     random.seed(5555 + num_sim)
     np.random.seed(19680801 + num_sim)
@@ -37,10 +40,13 @@ for i in range(num_sim):
     en, dev = network.energy()
     avg_en.append(en)
     std.append(dev)
-print("PDR :", statistics.fmean(pdrs))
-print("hops :", statistics.fmean(avg_hops))
-print("en :", statistics.fmean(avg_en))
-print("dev :", statistics.fmean(std))
+with open(f"results/{start_time}_{settings['NETWORK_NODES']}_{settings['ALGORITHM']}.txt", "a") as f:
+    if settings['ALGORITHM'] == "mab":
+                print("Reward:", self.settings["REWARD"], file=f)
+    print("PDR :", statistics.fmean(pdrs), file = f)
+    print("hops :", statistics.fmean(avg_hops), file = f)
+    print("en :", statistics.fmean(avg_en), file = f)
+    print("dev :", statistics.fmean(std), file = f)
 
 
 
